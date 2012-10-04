@@ -1,0 +1,16 @@
+{
+    "name": "CapacityNotification",
+    "className": "CustomApp",
+    "server": "https://hackathon.rallydev.com",
+    "sdk": "2.0p4",
+    "javascript": [
+        "App.js",
+        "CapacityOverload.js",
+        "CapacityUnderload.js",
+        "OK.js",
+        "ProjectManager.js"
+    ],
+    "css": [
+        "app.css"
+    ]
+}

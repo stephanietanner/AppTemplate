@@ -1,0 +1,498 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<!-- Copyright (c) 2011  Rally Software Development Corp.  All rights reserved -->
+<html>
+<head>
+    <title>InFlightCapacity</title>
+    <meta name="Name" content="App: In-Flight Capacity"/>
+    <meta name='Version' content='0.1'/>
+    <meta name='Vendor' content='Rally Labs'/>
+    <script type="text/javascript" src="/apps/1.25/sdk.js?debug=true"></script>
+ 
+    <script type="text/javascript">
+    var getSprintLength = function( iso_start, iso_end, exclude_weekends ) {
+          var length = 1;
+          if ( iso_start < iso_end ) {
+            js_start = dojo.date.stamp.fromISOString( iso_start );
+            js_end = dojo.date.stamp.fromISOString( iso_end );
+            length = ( ( js_end.getTime() - js_start.getTime() ) / 86400000 ) + 1;
+          } else if ( iso_start > iso_end ) {
+            js_end = dojo.date.stamp.fromISOString( iso_start );
+            js_start = dojo.date.stamp.fromISOString( iso_end );
+            length = ( ( js_end.getTime() - js_start.getTime() ) / 86400000 ) + 1;
+          }
+        
+          if ( exclude_weekends ) {
+            length = length - getWeekendCount( iso_start, iso_end );
+          }
+        
+          return length;
+        };
+        
+        // only count complete days
+        var getDaysFromStart = function( iso_start, iso_end, exclude_weekends ) {
+          var length = 1;
+          iso_end = iso_end.replace(/T.*$/,"");
+          if ( iso_start < iso_end ) {
+            js_start = dojo.date.stamp.fromISOString( iso_start );
+            js_end = dojo.date.stamp.fromISOString( iso_end );
+            length = ( ( js_end.getTime() - js_start.getTime() ) / 86400000 );
+          } else if ( iso_start > iso_end ) {
+            length = -1;
+          }
+        
+          if ( exclude_weekends ) {
+            length = length - getWeekendCount( iso_start, iso_end );
+          }
+        
+          return length;
+        };
+        
+        var getWeekendCount = function( iso_start, iso_end ) {
+          var count = 0;
+          if ( iso_start <= iso_end ) {
+            js_start = dojo.date.stamp.fromISOString( iso_start );
+            js_end = dojo.date.stamp.fromISOString( iso_end );
+            for ( d=js_start.getTime();d<js_end.getTime();d=d+86400000 ) {
+              check_date = new Date( d );
+              if (( check_date.getDay() === 0 ) || ( check_date.getDay() == 6 )) {
+                count++;
+              }
+            }
+          }
+          return count;
+        };
+    
+    function ProjectIterationCapacity(base_elem, rally_data_source, iteration_oid) {
+            var that = this;
+        
+            //html
+            var iterationInfo_table;
+            var iterationStart_span;
+            var iterationEnd_span;
+            var iterationDays_span;
+            var teamRemaining_span;
+            var teamCapacity_span;
+            var teamLoad_span;
+            var tableContainer_div;
+            var teamProjectInfo_span;
+        
+            //Data
+            var rallyDataSource;
+            var g_iteration_oid;
+            var g_iteration_start;
+            var g_iteration_end;
+        
+            //UI
+            var teamTable;
+        
+            function get_iteration() {
+                var ref = rally.sdk.util.Ref.getRefFromTypeAndObjectId("iteration", g_iteration_oid);
+                var iteration = rallyDataSource.getRallyObject(ref, read_iteration_info);
+            }
+        
+            function read_iteration_info(result) {
+                var project_oid = rally.sdk.util.Ref.getOidFromRef(result.Project._ref);
+                var project_name = result.Project._refObjectName;
+                teamProjectInfo_span.innerHTML = project_name + " - " + result.Name + " - " + result.Theme;
+                g_iteration_end = result.EndDate.split("T")[0];
+                g_iteration_start = result.StartDate.split("T")[0];
+                query_project_iteration(g_iteration_oid, project_oid);
+            }
+        
+            function query_project_iteration(iteration_oid, project_oid) {
+                var queryArray = [];
+                queryArray.push({
+                    key: 'project',
+                    type: 'projects',
+                    query: '( ObjectID = ' + project_oid + ' )',
+                    fetch: 'ObjectID,Name,TeamMembers,DisplayName,UserName'
+                });
+        
+                queryArray.push({
+                    key: 'capacities',
+                    type: 'useriterationcapacity',
+                    query: '( ( Iteration.ObjectID = ' + iteration_oid + ' ) AND ( Project.ObjectID = ' + project_oid + ') )',
+                    fetch: 'ObjectID,Capacity,Load,User,UserName,DisplayName'
+                });
+        
+                queryArray.push({
+                    key: 'tasks',
+                    type: 'tasks',
+                    query: '( ( Iteration.ObjectID = ' + iteration_oid + ' ) AND ( Project.ObjectID = ' + project_oid + '))',
+                    fetch: 'ObjectID,ScheduleState,ToDo,Owner,UserName,DisplayName'
+                });
+        
+                rallyDataSource.findAll( queryArray, calculateCapacity );
+            }
+        
+            function calculateCapacity( results ) {
+                var team = {};
+        
+                // calculate date information for sprint
+                iterationStart_span.innerHTML = g_iteration_start.replace(/\d\d\d\d-/,"").replace(/-/,"/");
+                iterationEnd_span.innerHTML = g_iteration_end.replace(/\d\d\d\d-/,"").replace(/-/,"/");
+                // true to exclude weekends
+                var today = dojo.date.locale.format( new Date(), { datePattern: "yyyy-MM-dd'T'HH:mm:ss" } );
+                var days_in_sprint = getSprintLength( g_iteration_start, g_iteration_end, true );
+                var days_into_sprint = getDaysFromStart( g_iteration_start, today, true );
+        
+                var ratio_remaining_in_sprint = 1;
+                if ( days_into_sprint < 1 ) {
+                    iterationDays_span.innerHTML = "0 of " + days_in_sprint;
+                } else if ( days_into_sprint < days_in_sprint ) {
+                    iterationDays_span.innerHTML = days_into_sprint + " of " + days_in_sprint;
+                    ratio_remaining_in_sprint = ( days_in_sprint - days_into_sprint ) / days_in_sprint;
+                } else if ( days_into_sprint >= days_in_sprint ) {
+                    iterationDays_span.innerHTML = days_in_sprint + " of " + days_in_sprint;
+                    ratio_remaining_in_sprint = 0;
+                }
+        
+                // for easy access later, let's turn the team into a hash where
+                // key is the user name
+                if ( results.project.length > 0 ) {
+                    var project = results.project[0];
+                    for ( var tm=0; tm<project.TeamMembers.length; tm++ ) {
+                      var member = project.TeamMembers[tm];
+                      member._formatted_name = "<strong>" + member.DisplayName + "</strong>";
+                      team[ member.UserName ] =  member ;
+                      team[ member.UserName ]._todo_total = 0;
+
+                    }
+                }
+        
+                // make a user to represent the sum of the whole team
+                team.team = {
+                    DisplayName         : "Whole Team",
+                    _formatted_name     : "Team",
+                    UserName            : "team",
+                    _initial_capacity   : null,
+                    _todo_total         : 0,
+                    _calculated_load    : null,
+                    _calculated_capacity: null
+                };
+        
+                // make a user to represent unassigned tasks
+                var no_owner = {
+                    DisplayName: "No Owner",
+                    _formatted_name: "No Owner",
+                    UserName: "none",
+                    _initial_capacity: null,
+                    _todo_total: 0
+                };
+        
+                // get the initial capacity for the iteration
+                for ( var uc=0;uc<results.capacities.length;uc++ ) {
+                    var usercap = results.capacities[uc];
+                    if ( ! team[ usercap.User.UserName ] ) {
+                      team[ usercap.User.UserName ] = usercap.User;
+                      team[ usercap.User.UserName ]._formatted_name = "<em>" + team[usercap.User.UserName].DisplayName + "</em>";
+                      team[ usercap.User.UserName ]._todo_total = 0;
+                    }
+                    team[ usercap.User.UserName ]._initial_capacity = usercap.Capacity;
+                    team.team._initial_capacity += usercap.Capacity;
+                }
+        
+                // assign to-do values to the users
+                for ( var t=0;t<results.tasks.length;t++ ) {
+                    var task = results.tasks[t];
+                    var task_owner = no_owner;
+        
+                    if ( task.Owner ) {
+                      task_owner = task.Owner;
+                    }
+        
+                    if ( ! team[ task_owner.UserName ] ) {
+                      team[ task_owner.UserName ] = task_owner;
+                    }
+                    if ( ! team[ task_owner.UserName ]._todo_total ) {
+                      team[ task_owner.UserName ]._todo_total = 0;
+                    }
+                    if (( task.ScheduleState != "Completed" ) && ( task.ToDo )) {
+                      team[ task_owner.UserName ]._todo_total += task.ToDo;
+                      team.team._todo_total += task.ToDo;
+                    }
+                }
+        
+                // convert team into an array so it'll go into the table later
+                var team_array = [];
+    	var individualload = 0;
+		var individualtodo = 0;
+		var individualcalculatedcapacity = 0;
+                for ( var m in team ) {
+                    if ( team.hasOwnProperty(m) ) {
+                      // final calculations
+                      if ( team[m]._initial_capacity ) {
+                        team[m]._calculated_capacity = (ratio_remaining_in_sprint * team[m]._initial_capacity).toFixed(2);
+                        if ( team[m]._calculated_capacity > 0 ) {
+                          var load = ( team[m]._todo_total / team[m]._calculated_capacity ) * 100;
+                          var color = "#6AB17D";
+
+if (team[m].UserName == 'jafeli@santanderconsumerusa.com')
+{
+			  individualload = load;
+			  individualtodo = team[m]._todo_total;
+			  individualcalculatedcapacity = team[m]._calculated_capacity;
+}
+                          if ( load > 100 ) {
+                            color = "#F47168";
+                          }
+                          var container_element = document.createElement('div');
+        
+                          var load_element = document.createElement("span");
+                          load_element.innerHTML = Math.ceil(load) + "%";
+                          if ( load > 100 ) {
+                            dojo.addClass( load_element, "red" );
+                          } else if ( load > 0 ) {
+                            dojo.addClass( load_element, "green" );
+                          }
+        
+                          dojo.place( load_element, container_element, "last" );
+                          team[m]._calculated_load = container_element.innerHTML;
+                        }
+                      }
+                      if ( m == "team" ) {
+                        teamCapacity_span.innerHTML = team.team._calculated_capacity || "" ;
+                        teamRemaining_span.innerHTML = team.team._todo_total;
+                        if ( team.team._calculated_load ) {
+                          teamLoad_span.innerHTML = team.team._calculated_load;
+                        }
+                      } else {
+
+if (team[m].UserName == 'jafeli@santanderconsumerusa.com')
+{
+                        team_array.push( team[m] );
+}
+                      }
+                    }
+                }
+                displayTable( team_array, individualload, individualtodo, individualcalculatedcapacity );
+            }
+        
+        
+            function displayTable( team, individualload, individualtodo, individualcalculatedcapacity ) {
+              //make table
+
+              var table_config = {
+                columnKeys: [ '_formatted_name', 'UserName', '_initial_capacity', '_calculated_capacity', '_todo_total', '_calculated_load' ],
+                columnHeaders: [ 'Name', 'UserName', 'Initial<br/>Capacity', 'Calculated<br/>Capacity', 'To Do', 'Calculated<br/>Load' ],
+                columnWidths: [ '250px', '120px', '75px', '75px', '75px', '75px' ]
+              };
+              teamTable = new rally.sdk.ui.Table(table_config);
+              teamTable.addRows( team );
+              teamTable.display( tableContainer_div );
+
+if (individualload > 100)
+{
+	alert("The total of hours assigned to your tasks for this iteration exceeds the capacity your project manager has allotted to you. Please adjust your hours downwards or discuss them with your project manager.");
+}
+
+if (individualtodo >= individualcalculatedcapacity)
+{
+	alert("Please access your timesheet and adjust your todo hours to reflect the remaining hours left for each task in the iteration");
+}
+		}
+        
+        
+            function init_layout(base_elem) {
+                //Team Info Spans   --------------------------------------------------------
+        
+                var container_tag = {
+                    "style" : {
+                        "display"       : "block",
+                        "float"         : "left",
+                        "width"         : "90%",
+                        "paddingTop"    : "15px",
+                        "paddingBottom" : "15px"
+                    }
+                };
+                var container  = dojo.create("div", container_tag, base_elem);
+        
+                dojo.create("hr", {}, container);
+                teamProjectInfo_span = dojo.create("span", {"class" : "iterationproject"}, container);
+        
+                var iterationInfotag = {
+                    "style" : { "display" : "table" , "float":"left" , "width" :"80%" , "paddingTop":"15px" , "paddingBottom" : "15px"}
+                };
+                iterationInfo_table  = dojo.create("table", iterationInfotag, container);
+        
+                var row1             = dojo.create("tr", {}, iterationInfo_table);
+                var row2             = dojo.create("tr", {}, iterationInfo_table);
+                var r1c1             = dojo.create("td", {}, row1);
+                var r1c2             = dojo.create("td", {}, row1);
+                var r1c3             = dojo.create("td", {}, row1);
+                var r2c1             = dojo.create("td", {}, row2);
+                var r2c2             = dojo.create("td", {}, row2);
+                var r2c3             = dojo.create("td", {}, row2);
+        
+                var iter_label       = dojo.create("span", {"innerHTML" : "Iteration Start: ", "class" : "metric"}, r1c1);
+                iterationStart_span  = dojo.create("span", {"class" : "metric"}, r1c1);
+                iter_label           = dojo.create("span", {"innerHTML" : "Iteration End: ", "class" : "metric"}, r1c2);
+                iterationEnd_span    = dojo.create("span", {"class" : "metric"}, r1c2);
+                iter_label           = dojo.create("span", {"innerHTML" : "Iteration Days: ", "class" : "metric"}, r1c3);
+                iterationDays_span   = dojo.create("span", {"class" : "metric"}, r1c3);
+        
+                var label            = dojo.create("span", {"innerHTML" : "Team ToDo: ", "class" : "metric"}, r2c1);
+                teamRemaining_span   = dojo.create("span", {"class" : "metric"}, r2c1);
+                label                = dojo.create("span", {"innerHTML" : "Team Calc Capacity: ", "class" : "metric"}, r2c2);
+                teamCapacity_span    = dojo.create("span", {"class" : "metric"}, r2c2);
+                label                = dojo.create("span", {"innerHTML" : "Team Load: ", "class" : "metric"}, r2c3);
+                teamLoad_span        = dojo.create("span", {"class" : "metric"}, r2c3);
+        
+                var tabletag = {
+                    "id"    : "teamtable-" + g_iteration_oid,
+                    "style" : {
+                        "display"   : "block",
+                        "float"     : "left"
+                    }
+                };
+                tableContainer_div = dojo.create("div", tabletag, container);
+            }
+        
+            this.display_iteration = function() {
+                get_iteration();
+            };
+        
+            this.destroy = function() {
+                if (teamTable) { teamTable.destroy(); }
+            };
+        
+            function init(base_elem, rally_data_source, iteration_oid) {
+                rallyDataSource = rally_data_source;
+                g_iteration_oid = iteration_oid;
+                init_layout(base_elem);
+            }
+        
+            init(base_elem, rally_data_source, iteration_oid);
+        }
+    function InFlightCapacity(base_elem) {
+            var that = this;
+        
+            //Data
+            var rallyDataSource = null;
+            var timebox;
+            var team_details = [];
+        
+            //HTML
+            var iterationDD_div;
+            var app_interface_div;
+            var app_info_div;
+        
+        
+            function build_projects(dropdown, eventArgs) {
+                empty_iteration_details();
+                team_details = [];
+                var iteration_oids = timebox.getSelectedOids();
+                for (var i=0; i<iteration_oids.length; i++) {
+                    var iteration_cap = new ProjectIterationCapacity(app_info_div, rallyDataSource, iteration_oids[i]);
+                    team_details.push(iteration_cap);
+                    iteration_cap.display_iteration();
+                }
+            }
+        
+            function empty_iteration_details() {
+                for (var idetail=0; idetail<team_details.length; idetail++) {
+                    team_details[idetail].destroy();
+                }
+                dojo.empty(app_info_div);
+            }
+        
+        
+            function init_layout(base_elem) {
+                app_interface_div   = dojo.create("div", {"id" : "app_interface", "style": {"display":"block"}}, base_elem);
+                app_info_div        = dojo.create("div", {"id" : "app_info", "style": {"display":"block"}}, base_elem);
+        
+                //Iteration Drop down and info  --------------------------------------------------------
+                var iterationDDtag = {
+                    "id" : "IterationDD",
+                    "style" : { "display" : "block" , "float":"left" , "width" :"30%" }
+                };
+                iterationDD_div = dojo.create("div", iterationDDtag, app_interface_div);
+            }
+        
+        
+            this.display = function(element) {
+                        rallyDataSource = new rally.sdk.data.RallyDataSource(
+                    '2595508869',
+                    '2707016904',
+                    'false',
+                    'true');
+        
+                //child   3823394429
+                //parent  https://trial.rallydev.com/slm/rally.sp#/detail/project/3823394047
+                //rallyDataSource = new rally.sdk.data.RallyDataSource('3823393969', '3823394047', false, true);
+        
+                var timebox_config = {
+                    label       : 'Pick an Iteration: ',
+                    showLabel   : true,
+                    obeyScoping : true
+                };
+                timebox = new rally.sdk.ui.IterationDropdown( timebox_config, rallyDataSource );
+                timebox.display( iterationDD_div, build_projects);
+            };
+        
+            init_layout(base_elem);
+        }
+ 
+    </script>
+ 
+    <style type="text/css">
+    .iterationproject {
+            font-family:Verdana,sans-serif;
+            font-size: 18px;
+            font-weight: bold;
+            display: table-cell;
+        }
+        .metric {
+            font-family:Verdana,sans-serif;
+            font-size: 14px;
+            font-weight: bold;
+            display: table-cell;
+        }
+        .red {
+            font-weight: bold;
+            color: #EF3F35;
+        }
+        .green {
+            font-weight: bold;
+            color: #3A874F;
+        }
+        .dojoxGridCell {
+            vertical-align: top;
+        }
+ 
+    </style>
+ 
+    <script type="text/javascript">
+ 
+        function onLoad() {
+            var inFlightCapacity = new InFlightCapacity("inFlightCapacityBase");
+            inFlightCapacity.display();
+        }
+        rally.addOnLoad(onLoad);
+ 
+    </script>
+</head>
+<body>
+<div id="inFlightCapacityBase" style="display: block;"></div>
+&nbsp;
+<div id="notes" style="display: block; width: 600px; padding-top: 30px;">
+     <em>Notes:</em>
+     <ul>
+       <li>
+       <strong>The inflight capacity has been personalized by filtering out other team members and adding alerts.</strong>
+       </li>
+       <li>
+         The Calculated Capacity is the number of hours remaining in the iteration capacity, assuming that the capacity is evenly spread across the iteration.  It is determined by multiplying the initial capacity by the percentage of days remaining in sprint (today counts as one of the full days remaining).
+       </li>
+       <li>
+       The Calculated Load is the percentage of the calculated capacity that has been committed to tasks.  It is determined by dividing the number of hours to do by the calculated capacity.
+       </li>
+       <li>
+       The Calculated Load is rounded to the next highest integer.
+       </li>
+
+     </ul>
+</div>
+ 
+</body>
+</html>

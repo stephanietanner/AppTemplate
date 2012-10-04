@@ -1,0 +1,1 @@
+{"ts":1349320084827,"silentsave":true,"restoring":false,"patch":[[{"diffs":[[1,"Ext.define('OK', {\n    \n    constructor: function(config) {\n        \n        config.viewport.add({\n            xtype: 'panel',\n            html: 'Your capacity is OK :)'\n        });\n    }\n       \n});\n"]],"start1":0,"start2":0,"length1":0,"length2":200}]],"length":200}

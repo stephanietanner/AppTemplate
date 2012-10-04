@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CapacityNotification</title>
+
+    <script type="text/javascript" src="/apps/2.0p4/sdk.js"></script>
+
+    <script type="text/javascript">
+        Rally.onReady(function() {
+            Ext.define('CustomApp', {
+                extend: 'Rally.app.App',
+                componentCls: 'app',
+                
+                launch: function() {
+                    var states = Ext.create('Ext.data.Store', {
+                        fields: ['name'],
+                        data : [
+                            {"name":"85"},
+                            {"name":"100"},
+                            {"name":"0"},
+                            {"name":"ProjectManager"}
+                        ]
+                    });
+            
+            
+                    this.stateCombo = this.add({
+                        xtype: 'combo',
+                        store: states,
+                        queryMode: 'local',
+                        displayField: 'name',
+                        valueField: 'name',
+                        listeners: {
+                            'select': this.onStateChange,
+                            scope: this
+                        }
+                    });
+                },
+                   
+                onStateChange: function(combo, record) {
+                    this.stateCombo.destroy();
+                    this.capacityNotificationView = Ext.create('Ext.panel.Panel', {
+                        bodyPadding: 20,
+                        border: 0,
+                        layout: 'hbox'
+                    });
+                    var state = record[0].get('name');
+                    if(state == '85') {
+                         Ext.create('CapacityUnderload', {
+                            viewport: this    
+                        });
+                    }
+                    if(state == '100') {
+                        Ext.create('CapacityOverload', {
+                            viewport: this
+                        });
+                    }
+                    if(state == '0') {
+                        Ext.create('OK', {
+                            viewport: this    
+                        });
+                    }
+                    if(state == 'ProjectManager') {
+                        Ext.create('ProjectManager', {
+                            viewport: this    
+                        });
+                    }
+                }
+                    
+            });
+            Ext.define('CapacityOverload', {
+                
+                constructor: function(config) {
+                    this.initConfig(config);
+                    this.capacityNotificationView = Ext.create('Ext.panel.Panel', {
+                        bodyPadding: 20,
+                        border: 0,
+                        layout: 'column'
+                    });
+                    this.viewport = config.viewport;
+                    this._buildIterationCombo();
+                    
+                    this.viewport.add(this.capacityNotificationView);
+                },
+                
+                    
+                _buildIterationCombo: function() {
+                    var iterationPanel = this.viewport.add({
+                         xtype: 'panel',
+                         border: 0,
+                         bodyPadding: 10,
+                    });
+                    this.iterationCombo = iterationPanel.add({
+                        xtype: 'rallyiterationcombobox',
+                        listeners: {
+                            ready: this._buildTaskGrid,
+                            scope: this
+                        }
+                    });
+                },
+            
+                
+                _buildTaskGrid: function() {
+                    var query = this.iterationCombo.getQueryFromSelected();
+                    Rally.data.ModelFactory.getModel({
+                        type: 'Task',
+                        scope: this,
+                        success: function(taskModel) {
+                            this.capacityNotificationView.add({
+                                xtype: 'rallygrid',
+                                model: taskModel,
+                                width: '30%',
+                                columnCfgs: [
+                                    'FormattedID',
+                                    'Name',
+                                    'Owner',
+                                    'State'
+                                ],
+                                storeConfig: {
+                                    filters: [{
+                    			        property: 'Owner',
+            					        value: Rally.environment.getContext().getUser()._ref
+            					    },
+                                    query
+                                    ]
+                                },
+                                listeners: {
+                                    select:  this._updateBurndown,
+                                    scope: this
+                                }
+                                
+                            });
+                            this._buildChartTaskBurndown();
+                        }
+                    });        
+                },
+                
+                _updateBurndown: function(scope, record) {
+                    Ext.create('Rally.data.lookback.SnapshotStore', {
+                        listeners: {
+                            load: {
+                                fn: this._buildChart,
+                                scope:this
+                            }
+                        },
+                    
+                        autoLoad: true,
+                        fetch: ['ToDo'],
+                        start: 0,
+                        rawFind: { FormattedID: record.get('FormattedID')}
+                    });
+                    var taskBurndownPanel = Ext.getCmp('taskBurndownPanel');
+                    taskBurndownPanel.update(record.get("Name"));
+                },
+                
+                _buildChartTaskBurndown: function() {
+                    this.capacityNotificationView.add({
+                        xtype: 'panel',
+                        id: 'taskBurndownPanel',
+                        itemId: 'taskBurndownPanel',
+                        width: '70%',
+                        border: 0
+                    });
+                },
+                
+                _buildChart: function(store, records) {
+                    var fakeStore = this._getFakeStore(store, records);
+                    var chartConfig = {
+                        xtype : 'rallychart',
+                        id : 'chart',
+            
+            //            store: store,
+                        store: fakeStore,
+            
+                        height: 400,
+            
+                        series : [
+                            {
+                              type : 'line',
+                              yField : 'ToDo',
+                              name : 'To Do (h)',
+                              visible : true
+                            }
+                        ],
+                        
+                        xField : '_ValidFrom',
+                        chartConfig : {
+                           chart : {
+                            marginRight : 130,
+                            marginBottom : 250,
+                            zoomType : 'x',
+                            animation : {
+                              duration : 1500,
+                              easing : 'swing'
+                            }
+                          },
+                          title : {
+                            text : 'Task Burndown',
+                            align: 'center'
+                          },
+                          xAxis : [{
+                            title : {
+                              text : 'Days in Iteration',
+                              margin : 40
+                            },
+                            labels : {
+                              align: 'right',
+                              rotation : 300
+                            }
+                          }],
+                          yAxis : {
+                            title : {
+                              text : 'To Do (h)'
+                            },
+                            plotLines : [{
+                              value : 0,
+                              width : 1,
+                              color : '#808080'
+                            }]
+                          },
+                          plotOptions : {
+                              column: {
+                                  color: '#F00'                              
+                              },
+                            series : {
+                              animation : {
+                                duration : 3000,
+                                easing : 'swing'
+                              }
+                            }
+                          },
+                          tooltip : {
+                            formatter : function() {
+                              return this.x + ': ' + this.y;
+                            }
+                          },
+                          legend : {
+                            layout : 'vertical',
+                            align : 'right',
+                            verticalAlign : 'top',
+                            x : -10,
+                            y : 100,
+                            borderWidth : 0
+                          }
+                        
+                      }
+                    };
+                    var chartHolder = this.viewport.down('#taskBurndownPanel');
+                    chartHolder.removeAll(true);
+                    chartHolder.add(chartConfig);
+                },
+                
+                _getFakeStore: function(store, record) {
+                    var fakeStore = Ext.create('Ext.data.Store', {
+                        fields: ['ToDo', '_ValidFrom'],
+                        data : [
+                            {"ToDo":Math.floor(Math.random()*11), "_ValidFrom":"10/09/2012"},
+                            {"ToDo":Math.floor(Math.random()*11), "_ValidFrom":"10/10/2012"},
+                            {"ToDo":Math.floor(Math.random()*11), "_ValidFrom":"10/11/2012"},
+                            {"ToDo":Math.floor(Math.random()*11), "_ValidFrom":"10/12/2012"}
+                        ]
+                    });
+                    
+                    return fakeStore;
+                }
+                
+            });
+            Ext.define('CapacityUnderload', {
+                
+                constructor: function(config) {
+                
+                    this.viewport = config.viewport;
+                    
+                    this.viewport.add({
+                        xtype: 'panel',
+                        html: 'Oh no! your capacity is below 85!'
+                    });
+                }
+                   
+            });
+            Ext.define('OK', {
+                
+                constructor: function(config) {
+                    
+                    config.viewport.add({
+                        xtype: 'panel',
+                        html: 'Your capacity is OK :)'
+                    });
+                }
+                   
+            });
+            Ext.define('ProjectManager', {
+                
+                constructor: function(config) {
+                    this.viewport = config.viewport;
+                    this.capacityNotificationView = Ext.create('Ext.panel.Panel', {
+                        bodyPadding: 20,
+                        border: 0,
+                        layout: 'column'
+                    });
+                    this._buildIterationCombo();
+            
+                    this.viewport.add(this.capacityNotificationView);
+                },
+                
+                 _buildIterationCombo: function() {
+                    var iterationPanel = this.viewport.add({
+                         xtype: 'panel',
+                         border: 0,
+                         bodyPadding: 10,
+                    });
+                    this.iterationCombo = iterationPanel.add({
+                        xtype: 'rallyiterationcombobox',
+                        listeners: {
+                            ready: this._loadIterationCapacities,
+                            scope: this
+                        }
+                    });
+                },
+                
+                _loadIterationCapacities: function() {
+                     Rally.data.ModelFactory.getModel({
+                        type: 'Project',
+                        scope: this,
+                        success: function(projectModel) {
+                            projectModel.load(Rally.environment.getContext().getScope().project.ObjectID, {
+                                success: function(record) {
+                                    this._getUserIterationCapacity(record.get('TeamMembers'));
+                                },
+                                scope: this
+                            });
+            
+                        }
+                    });        
+                },
+            
+                
+                _getUserIterationCapacity: function(teamMembers) {
+                    this._loadTasksForIteration();
+                    this.teamMembers = teamMembers;
+                    this.teamMemberCount = teamMembers.length;
+                    this.iterationQuery = this.iterationCombo.getQueryFromSelected();
+                    Rally.data.ModelFactory.getModel({
+                        type: 'UserIterationCapacity',
+                        scope: this,
+                        success: function(userIterationCapacityModel) {
+                            for(var i = 0; i < teamMembers.length; i++) {
+                                Ext.create('Rally.data.WsapiDataStore', {
+                                    model: userIterationCapacityModel,
+                                    fetch: true,
+                                    filters: [
+                                        {
+                                            property: 'User',
+                                            value: teamMembers[i]._ref
+                                        },
+                                        this.iterationQuery
+                                    ],
+                                    autoLoad: true,
+                                    listeners: {
+                                       load: {
+                                            fn: this._onIterationCapacityLoad,
+                                            scope: this
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                        
+                    });
+                },
+                _onIterationCapacityLoad: function(record) {
+                    if(!this.iterationLoadCount) {
+                        this.iterationLoadCount = 0;
+                    }
+                    this.iterationLoadCount++;
+                    if(record.getItems().length > 0) {
+                        var capacityRecords = record.getItems();
+                        if(!this.capacityMap) {
+                            this.capacityMap = [];
+                        }
+                        for(var i = 0; i < capacityRecords.length; i++) {
+                            var capacity = {};
+                            capacity.capacity = capacityRecords[i]['Capacity'];
+                            capacity.taskEstimates = capacityRecords[i]['TaskEstimates'];
+                            capacity.username = capacityRecords[i]['User']['_refObjectName'];
+                            capacity.userRef = capacityRecords[i]['User']['_ref'];
+                        }
+                        this.capacityMap.push(capacity);
+                    }
+                    if(this.iterationLoadCount == this.teamMemberCount) {           
+                        // this._getTotalToDoForUsers();
+                    }
+                },
+                buildNeedMoreWorkTemplate: function(needMoreWork) {
+                    var html = "";
+                    for(var i = 0; i < needMoreWork.length; i++) {
+                        html += needMoreWork[i].username + "\n";
+                    }
+                    return html;
+                },
+                
+                _getTotalToDoForUsers: function(store, record) { 
+                    var userMap = {
+                        needMoreWork: [],
+                        needLessWork: []
+                    };
+                    if(this.capacityMap) {
+                        for(var i = 0; i < this.capacityMap.length; i++) {
+                            this.capacityMap[i].totalToDo = 0;
+                            for(var v = 0; v < record.length; v++) {
+                                var task = record[v].data;
+                                if(task.Owner._ref == this.capacityMap[i].userRef) {
+                                    this.capacityMap[i].totalToDo += task.ToDo;
+                                }
+                            }
+                            var calculatedLoad = this.capacityMap[i].totalToDo / this.capacityMap[i].capacity;
+                            if((calculatedLoad * 100) > 100) {
+                                userMap.needMoreWork.push(this.capacityMap[i]);
+                            }
+                            if((calculatedLoad * 100) < 85) {
+                                userMap.needLessWork.push(this.capacityMap[i]);
+                            }
+                        }
+                        var needLessWorkFilter = this._getTasksForUsersWhoNeedLessWork(userMap.needLessWork);
+                        this.capacityNotificationView.add({
+                            xtype: 'panel',
+                            width: '40%',
+                            border: 1,
+                            style: {
+                                borderColor: 'black',
+                                borderStyle: 'solid'
+                            },                
+                            bodyPadding: 20,
+                            html: "<h1>These users could use more work</h1><span>" + this.buildNeedMoreWorkTemplate(userMap.needMoreWork) + "</span>"
+                        });
+                        this.capacityNotificationView.add({
+                            xtype: 'rallygrid',
+                            store: store,
+                            width: '60%',
+                            columnCfgs: [
+                                 'FormattedID',
+                                 'Name',
+                                 'Owner'
+                             ],
+                             filters: [
+                                {
+                                    property:'Owner',
+                                    value: userMap.needLessWork[0].userRef
+                                }
+                             ]
+                        });
+                    }
+                },
+            
+                _getTasksForUsersWhoNeedLessWork: function(needLessWork) {
+                    var filter = {};
+                    for(var i = 0; i < needLessWork.length; i++) {
+                        filter.property = 'Owner',
+                        filter.value =  needLessWork[i].userRef
+                    }
+            
+            
+                    return filter;
+                },
+            
+                _loadTasksForIteration: function() {
+                     Rally.data.ModelFactory.getModel({
+                            type: 'Task',
+                            scope: this,
+                            success: function(taskModel) {
+                                this.taskStore = Ext.create('Rally.data.WsapiDataStore', {
+                                    model: taskModel,
+                                    fetch: true,
+                                    filters: [
+                                        this.iterationQuery
+                                    ],
+                                    listeners: {
+                                        load: {
+                                            fn: this._getTotalToDoForUsers,
+                                            scope: this
+                                        }
+                                    },
+                                    autoLoad: true
+                                });
+                            }
+                        });        
+            
+                }
+                
+             //** Need to wait for all loads to be finished and then create the Kanban app
+            //        if(capacityMap) {
+            //            this.viewport.add({
+            //                xtype: 'rallycardboard',
+            //                types: ['Tasks'],
+            //                attribute: 'State',
+            //                storeConfig: {
+            //                     filters: [
+            //                        {
+            //                            property: 'Iteration',
+            //                            value: this.iterationQuery
+            //                        },
+            //                        {
+            //                            property: 'User',
+            //                            value: capacityMap.userRef
+            //                            
+            //                        }
+            //                    ],
+            //                   fetch: '',
+            //                    pageSize: 20
+            //
+            //    }
+            });
+            Rally.launchApp('CustomApp', {
+                name: 'CapacityNotification'
+            });
+        });
+    </script>
+
+    <style type="text/css">
+        .app {
+             /* Add app styles here */
+        }
+    </style>
+</head>
+<body></body>
+</html>
